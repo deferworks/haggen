@@ -9,17 +9,21 @@ repositories {
 }
 
 dependencies {
-    project(":haggen-core")
+    implementation(project(':haggen-core'))
+    implementation(project(':haggen-db'))
 
     implementation "org.postgresql:postgresql:42.7.7"
     implementation "com.zaxxer:HikariCP:6.3.0"
     implementation 'org.slf4j:slf4j-api:2.0.17'
     implementation 'ch.qos.logback:logback-classic:1.5.18'
+    implementation "org.flywaydb:flyway-core:11.9.2"
 
     testImplementation platform("org.junit:junit-bom:5.10.0")
     testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
     testImplementation "org.testcontainers:junit-jupiter:1.21.3"
     testImplementation "org.testcontainers:postgresql:1.21.3"
+    testImplementation 'org.flywaydb:flyway-database-postgresql:11.9.2'
 }
 
 // Apply a specific Java toolchain to ease working on different environments.

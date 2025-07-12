@@ -1,6 +1,6 @@
 package co.deferworks.haggen.core;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -21,19 +21,127 @@ import java.util.UUID;
  * by workers via heart beats and token-based leases which allow non-idempotent jobs to be safely
  * re-enqueued by providing the right token.
  */
-public class Job {
-    // The unique resource identifier for the job, it is assigned on creation.
-    private final UUID id = UUID.randomUUID();
+public record Job(
+        UUID id,
+        String kind,
+        String queue,
+        String metadata, // Stored as JSONB in the database
+        JobPriority priority,
+        JobState state,
+        OffsetDateTime runAt,
+        OffsetDateTime createdAt,
+        int attemptCount,
+        String lastErrorMessage,
+        String lastErrorDetails,
+        JobLeaseKind leaseKind,
+        UUID lockedBy,
+        OffsetDateTime lockedAt,
+        UUID leaseToken
+) {
 
-    // The job kind uniquely identifies the type of the job as which worker
-    // pool it will be assigned to.
-    private final String kind;
+    public static Builder builder() {
+        return new Builder();
+    }
 
-    // The metadata field is space used to storing arbitrary metadata about the job.
-    private final Byte[] metadata;
+    public static final class Builder {
+        private UUID id;
+        private String kind;
+        private String queue;
+        private String metadata = "{}";
+        private JobPriority priority = JobPriority.NORMAL;
+        private JobState state = JobState.QUEUED;
+        private OffsetDateTime runAt = OffsetDateTime.now();
+        private OffsetDateTime createdAt = OffsetDateTime.now();
+        private int attemptCount = 0;
+        private String lastErrorMessage;
+        private String lastErrorDetails;
+        private JobLeaseKind leaseKind = JobLeaseKind.EXPIRABLE;
+        private UUID lockedBy;
+        private OffsetDateTime lockedAt;
+        private UUID leaseToken;
 
-    // The queue assigned to the job, this is used to find the job in the.
-    private final String queue;
+        private Builder() {
+        }
+
+        public Builder id(UUID id) {
+            this.id = id;
+            return this;
+        }
+
+        public Builder kind(String kind) {
+            this.kind = kind;
+            return this;
+        }
+
+        public Builder queue(String queue) {
+            this.queue = queue;
+            return this;
+        }
+
+        public Builder metadata(String metadata) {
+            this.metadata = metadata;
+            return this;
+        }
+
+        public Builder priority(JobPriority priority) {
+            this.priority = priority;
+            return this;
+        }
+
+        public Builder state(JobState state) {
+            this.state = state;
+            return this;
+        }
+
+        public Builder runAt(OffsetDateTime runAt) {
+            this.runAt = runAt;
+            return this;
+        }
+
+        public Builder createdAt(OffsetDateTime createdAt) {
+            this.createdAt = createdAt;
+            return this;
+        }
+
+        public Builder attemptCount(int attemptCount) {
+            this.attemptCount = attemptCount;
+            return this;
+        }
+
+        public Builder lastErrorMessage(String lastErrorMessage) {
+            this.lastErrorMessage = lastErrorMessage;
+            return this;
+        }
+
+        public Builder lastErrorDetails(String lastErrorDetails) {
+            this.lastErrorDetails = lastErrorDetails;
+            return this;
+        }
+
+        public Builder leaseKind(JobLeaseKind leaseKind) {
+            this.leaseKind = leaseKind;
+            return this;
+        }
+
+        public Builder lockedBy(UUID lockedBy) {
+            this.lockedBy = lockedBy;
+            return this;
+        }
+
+        public Builder lockedAt(OffsetDateTime lockedAt) {
+            this.lockedAt = lockedAt;
+            return this;
+        }
+
+        public Builder leaseToken(UUID leaseToken) {
+            this.leaseToken = leaseToken;
+            return this;
+        }
+
+        public Job build() {
+            return new Job(id, kind, queue, metadata, priority, state, runAt, createdAt, attemptCount, lastErrorMessage, lastErrorDetails, leaseKind, lockedBy, lockedAt, leaseToken);
+        }
+    }
 
     /**
      * JobState represents the various states a job can be in within the Haggen
@@ -71,23 +179,24 @@ public class Job {
         PAUSED,
     }
 
-    // The current job state.
-    private final JobState state;
-
-    // The job's assigned priority.
-    public enum JobPriority {
-        URGENT,
-        HIGH,
-        NORMAL,
-        LOW,
-    }
-
-    private final JobPriority priority;
-
     /**
-     * Metadata on the job's scheduling and execution.
+     * The job's assigned priority. This maps to an integer in the database.
      */
-    public record JobMetadata(Instant createdAt, Instant attemptedAt, Instant scheduledAt) {
+    public enum JobPriority {
+        URGENT(0),
+        HIGH(1),
+        NORMAL(2),
+        LOW(3);
+
+        private final int value;
+
+        JobPriority(int value) {
+            this.value = value;
+        }
+
+        public int getValue() {
+            return value;
+        }
     }
 
     /**
@@ -102,73 +211,12 @@ public class Job {
         PERMANENT,
     }
 
-    /**
-     * JobLockKind represents the kind of locks that workers take on a job, row level locks are ideal for workloads
-     * that operate within the context of your application. Advisory locks are ideal for workloads that involve
-     * external services or are across the boundary of your application. For example, if you model a virtual resource
-     * like an AWS resource in your application, you can use an advisory lock to ensure that at most one job updates
-     * its metadata in your control plane.
-     */
-    public enum JobLockKind {
-        ROW_LEVEL,
-        ADVISORY,
-    }
-
-    /**
-     * Metadata on the job's lease, the moment it was locked by a worker
-     * and the ID of the worker who locked it.
-     */
-    public record JobLeaseMetadata(JobLeaseKind lease, Instant lockedAt, String lockedBy, JobLockKind lock) {
-    }
-
-    /**
-     * @param kind:     Job kind, user provided.
-     * @param priority: Job priority.
-     * @param state:    Job state.
-     * @param metadata: Job metadata, arbitrary user provided.
-     * @param queue:    Job queue.
-     */
-    public Job(String kind, JobPriority priority, JobState state, Byte[] metadata, String queue) {
-        this.kind = kind;
-        this.state = state;
-        this.metadata = metadata;
-        this.queue = queue;
-        this.priority = priority;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getKind() {
-        return kind;
-    }
-
-    public Byte[] getMetadata() {
-        return metadata;
-    }
-
-    public String getQueue() {
-        return queue;
-    }
-
-    public JobState getState() {
-        return state;
-    }
-
-    public JobPriority getPriority() {
-        return priority;
-    }
-
-
     @Override
     public String toString() {
-        return "Job{" +
-                "id=" + id +
-                ", kind='" + kind + '\'' +
-                ", metadata=" + (metadata != null ? metadata.length : 0) +
-                ", queue='" + queue + '\'' +
-                '}';
+        return "job.id=" + id +
+                " job.kind=" + kind +
+                " job.queue=" + queue +
+                " job.state=" + state +
+                " job.priority=" + priority;
     }
-
 }

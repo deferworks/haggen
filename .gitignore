@@ -202,4 +202,7 @@ gradle-app.setting
 # Java heap dump
 *.hprof
 
+### Gemini ###
+GEMINI.md
+
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,intellij,java,gradle,kotlin
