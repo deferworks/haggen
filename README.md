@@ -15,4 +15,3 @@ Haggen's core features and reliability is based on very simple principles :
 * **Natively distributed** By leveraging Postgres advisory locks Haggen can scale horizontally across multiple services
   without requiring any added deployments or services.
 * **Designed by API** Haggen allows you to enqueue jobs via a single method call or via a gRPC API.
-

@@ -6,11 +6,11 @@ import com.zaxxer.hikari.HikariDataSource;
 
 import java.util.UUID;
 
-public class PostgresJobRepository {
+public class PostgresJobRegistry {
     private final HikariDataSource dataSource;
     private final String workerId = UUID.randomUUID().toString();
 
-    public PostgresJobRepository(String jdbcUrl, String username, String password) {
+    public PostgresJobRegistry(String jdbcUrl, String username, String password) {
         var config = new HikariConfig();
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(username);

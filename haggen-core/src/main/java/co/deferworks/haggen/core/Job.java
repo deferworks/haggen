@@ -99,7 +99,7 @@ public class Job {
      */
     public enum JobLeaseKind {
         EXPIRABLE,
-        TOKENIZED,
+        PERMANENT,
     }
 
     /**

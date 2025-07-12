@@ -15,3 +15,4 @@ include('app', 'haggen-core')
 
 include 'haggen-driver'
 include 'haggen-driver'
+include 'haggen-db'

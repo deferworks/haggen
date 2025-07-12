@@ -1,32 +1,30 @@
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 
 plugins {
-    id "java"
+    id 'java'
+    id 'org.flywaydb.flyway' version '11.10.2'
 }
+
+group = 'co.deferworks.haggen.db'
+version = 'unspecified'
 
 repositories {
     mavenCentral()
 }
 
-dependencies {
-    project(":haggen-core")
 
+dependencies {
     implementation "org.postgresql:postgresql:42.7.7"
-    implementation "com.zaxxer:HikariCP:6.3.0"
     implementation 'org.slf4j:slf4j-api:2.0.17'
     implementation 'ch.qos.logback:logback-classic:1.5.18'
 
-    testImplementation platform("org.junit:junit-bom:5.10.0")
-    testImplementation "org.junit.jupiter:junit-jupiter"
-    testImplementation "org.testcontainers:junit-jupiter:1.21.3"
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation "org.testcontainers:postgresql:1.21.3"
-}
+    testImplementation 'org.postgresql:postgresql:42.7.7'
 
-// Apply a specific Java toolchain to ease working on different environments.
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
+    testImplementation 'org.flywaydb:flyway-core:11.9.2'
+    testImplementation 'org.flywaydb:flyway-database-postgresql:11.9.2'
 }
 
 test {
@@ -41,9 +39,4 @@ test {
         environment "DOCKER_HOST", "unix:///tmp/podman.sock"
     }
     environment "TESTCONTAINERS_RYUK_DISABLED", "true"
-}
-
-tasks.named('test') {
-    // Use JUnit Platform for unit tests.
-    useJUnitPlatform()
 }
