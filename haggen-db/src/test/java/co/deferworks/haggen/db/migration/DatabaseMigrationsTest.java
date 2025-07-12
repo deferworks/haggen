@@ -12,7 +12,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-public class HaggenDatabaseMigrationsTest {
+public class DatabaseMigrationsTest {
 
     private static final PostgreSQLContainer<?> pgContainer = new PostgreSQLContainer<>("postgres:16.9")
             .withDatabaseName("haggen-tests-db")
@@ -40,7 +40,7 @@ public class HaggenDatabaseMigrationsTest {
         var username = pgContainer.getUsername();
         var password = pgContainer.getPassword();
 
-        var flyway = Flyway.configure(HaggenDatabaseMigrationsTest.class.getClassLoader())
+        var flyway = Flyway.configure()
                 .dataSource(jdbcUrl, username, password)
                 .locations("classpath:db/migration")
                 .load();
