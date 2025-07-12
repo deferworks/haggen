@@ -1,0 +1,46 @@
+import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
+
+plugins {
+    id "java"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    project(":haggen-core")
+
+    implementation "org.postgresql:postgresql:42.7.7"
+    implementation "com.zaxxer:HikariCP:6.3.0"
+
+    testImplementation platform("org.junit:junit-bom:5.10.0")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testImplementation "org.testcontainers:postgresql:1.21.3"
+}
+
+// Apply a specific Java toolchain to ease working on different environments.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+test {
+    useJUnitPlatform()
+
+    // Podman specific tests.
+    OperatingSystem os = DefaultNativePlatform.currentOperatingSystem;
+    if (os.isLinux()) {
+        def uid = ["id", "-u"].execute().text.trim()
+        environment "DOCKER_HOST", "unix:///run/user/$uid/podman/podman.sock"
+    } else if (os.isMacOsX()) {
+        environment "DOCKER_HOST", "unix:///tmp/podman.sock"
+    }
+    environment "TESTCONTAINERS_RYUK_DISABLED", "true"
+}
+
+tasks.named('test') {
+    // Use JUnit Platform for unit tests.
+    useJUnitPlatform()
+}
