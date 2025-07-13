@@ -1,7 +1,8 @@
 package co.deferworks.haggen.driver;
 
 import co.deferworks.haggen.core.Job;
-import co.deferworks.haggen.driver.HookRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.time.OffsetDateTime;
@@ -17,6 +18,8 @@ import java.util.UUID;
  * is a standard and efficient way to handle connection pooling.
  */
 public class PostgresJobRepository implements JobRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(PostgresJobRepository.class);
 
     private final DataSource dataSource;
     private final HookRegistry hookRegistry;
@@ -144,7 +147,13 @@ public class PostgresJobRepository implements JobRepository {
             statement.setObject(1, jobId);
             int updatedRows = statement.executeUpdate();
             if (updatedRows > 0) {
-                findById(jobId).ifPresent(hookRegistry::executeOnComplete);
+                Optional<Job> updatedJob = findById(jobId);
+                if (updatedJob.isPresent()) {
+                    hookRegistry.executeOnComplete(updatedJob.get());
+                    log.info("Hook executed for onComplete for job: {}", jobId);
+                } else {
+                    log.warn("Job {} not found after markComplete, hook not executed.", jobId);
+                }
             }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error marking job as complete", e);
@@ -166,7 +175,13 @@ public class PostgresJobRepository implements JobRepository {
             statement.setObject(2, jobId);
             int updatedRows = statement.executeUpdate();
             if (updatedRows > 0) {
-                findById(jobId).ifPresent(hookRegistry::executeOnFail);
+                Optional<Job> updatedJob = findById(jobId);
+                if (updatedJob.isPresent()) {
+                    hookRegistry.executeOnFail(updatedJob.get());
+                    log.info("Hook executed for onFail for job: {}", jobId);
+                } else {
+                    log.warn("Job {} not found after markFailed, hook not executed.", jobId);
+                }
             }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error marking job as failed", e);
@@ -176,7 +191,7 @@ public class PostgresJobRepository implements JobRepository {
     private static final String REAP_STALE_JOBS_SQL = """
             UPDATE jobs
             SET state = 'QUEUED', locked_by = NULL, locked_at = NULL
-            WHERE state = 'RUNNING' AND lease_kind = 'PERMANENT'
+            WHERE state = 'RUNNING' AND lease_kind = 'EXPIRABLE' AND locked_at < NOW() - INTERVAL '1 hour'
             RETURNING id, kind, queue, metadata, priority, state, run_at, created_at, attempt_count, last_error_message, last_error_details, lease_kind, locked_by, locked_at, lease_token;
             """;
 

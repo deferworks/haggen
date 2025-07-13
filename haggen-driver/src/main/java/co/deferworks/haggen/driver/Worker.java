@@ -36,7 +36,7 @@ public class Worker implements Runnable {
                         jobRepository.markFailed(job.id(), e.getMessage());
                     }
                 });
-                Thread.sleep(500); // Poll every second
+                Thread.sleep(500); // Poll every 500ms.
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.info("Worker {} interrupted.", workerId);

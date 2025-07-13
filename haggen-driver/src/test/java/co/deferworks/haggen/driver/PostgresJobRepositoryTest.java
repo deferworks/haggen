@@ -8,16 +8,17 @@ import co.deferworks.haggen.db.DatabaseMigrations;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,30 +32,46 @@ class PostgresJobRepositoryTest {
             .withDatabaseName("haggen-test")
             .withUsername("test")
             .withPassword("test");
-    private static final Logger log = LoggerFactory.getLogger(PostgresJobRepositoryTest.class);
 
     private HikariDataSource dataSource;
     private PostgresJobRepository jobRepository;
 
+    private static final Logger logger = LoggerFactory.getLogger(PostgresJobRepositoryTest.class);
+
+    @BeforeAll
+    static void ensureContainerIsRunning() {
+        postgres.start();
+        assertTrue(postgres.isRunning());
+        // Apply Flyway migrations
+        Flyway flyway = Flyway.configure(DatabaseMigrations.class.getClassLoader())
+                .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load();
+        flyway.migrate();
+    }
+
+    @AfterAll
+    static void shutdownContainer() {
+        postgres.stop();
+        assertFalse(postgres.isRunning());
+    }
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws SQLException {
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(postgres.getJdbcUrl());
         config.setUsername(postgres.getUsername());
         config.setPassword(postgres.getPassword());
+
         dataSource = new HikariDataSource(config);
-
-        // Apply Flyway migrations
-        Flyway flyway = Flyway.configure(DatabaseMigrations.class.getClassLoader()).dataSource(dataSource)
-                .locations("classpath:db/migration").load();
-        flyway.migrate();
-
         jobRepository = new PostgresJobRepository(dataSource);
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws SQLException {
         if (dataSource != null) {
+            // Clean up existing jobs.
+            var conn = dataSource.getConnection();
+            conn.createStatement().executeUpdate("TRUNCATE TABLE jobs;");
             dataSource.close();
         }
     }
@@ -230,17 +247,136 @@ class PostgresJobRepositoryTest {
 
         // Verify stale job is reaped
         Optional<Job> reapedJob = jobRepository.findById(createdStaleJob.id());
-        log.info(reapedJob.get().toString());
         assertTrue(reapedJob.isPresent());
-        assertEquals(JobState.RUNNING, reapedJob.get().state());
+        assertEquals(JobState.QUEUED, reapedJob.get().state());
         assertNull(reapedJob.get().lockedBy());
-        assertNotNull(reapedJob.get().lockedAt());
+        assertNull(reapedJob.get().lockedAt());
 
         // Verify permanent job is not reaped
         Optional<Job> notReapedJob = jobRepository.findById(createdPermanentJob.id());
-        log.info(notReapedJob.get().toString());
         assertTrue(notReapedJob.isPresent());
-        assertEquals(JobState.QUEUED, notReapedJob.get().state());
+        assertEquals(JobState.RUNNING, notReapedJob.get().state());
         assertEquals(JobLeaseKind.PERMANENT, notReapedJob.get().leaseKind());
+    }
+
+    @Test
+    void testTransactionalEnqueueing() throws Exception {
+        // Scenario 1: Commit
+        try (java.sql.Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+
+            Job jobToEnqueue = Job.builder()
+                    .kind("transactional-commit-job")
+                    .queue("default")
+                    .build();
+
+            Job createdJob = jobRepository.create(jobToEnqueue, connection);
+            assertNotNull(createdJob.id());
+            assertEquals(JobState.QUEUED, createdJob.state());
+
+            // Job should not be visible before commit
+            assertFalse(jobRepository.findById(createdJob.id()).isPresent());
+
+            connection.commit();
+
+            // Job should be visible after commit
+            Optional<Job> foundJob = jobRepository.findById(createdJob.id());
+            assertTrue(foundJob.isPresent());
+            assertEquals(createdJob, foundJob.get());
+        }
+
+        // Scenario 2: Rollback
+        try (java.sql.Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+
+            Job jobToEnqueue = Job.builder()
+                    .kind("transactional-rollback-job")
+                    .queue("default")
+                    .build();
+
+            Job createdJob = jobRepository.create(jobToEnqueue, connection);
+            assertNotNull(createdJob.id());
+            assertEquals(JobState.QUEUED, createdJob.state());
+
+            // Job should not be visible before rollback
+            assertFalse(jobRepository.findById(createdJob.id()).isPresent());
+
+            connection.rollback();
+
+            // Job should not be visible after rollback
+            assertFalse(jobRepository.findById(createdJob.id()).isPresent());
+        }
+    }
+
+    @Test
+    void testHookRegistryInvocation() throws Exception {
+        final String TEST_JOB_KIND = "hook-test-job";
+
+        // Custom consumers to record invocations
+        final List<UUID> enqueuedJobs = new ArrayList<>();
+        final List<UUID> dequeuedJobs = new ArrayList<>();
+        final List<UUID> completedJobs = new ArrayList<>();
+        final List<UUID> failedJobs = new ArrayList<>();
+        final List<UUID> reapedJobs = new ArrayList<>();
+
+        HookRegistry testHookRegistry = new HookRegistry();
+        testHookRegistry.registerOnEnqueue(TEST_JOB_KIND, job -> enqueuedJobs.add(job.id()));
+        testHookRegistry.registerOnDequeue(TEST_JOB_KIND, job -> dequeuedJobs.add(job.id()));
+        testHookRegistry.registerOnComplete(TEST_JOB_KIND, job -> completedJobs.add(job.id()));
+        testHookRegistry.registerOnFail(TEST_JOB_KIND, job -> failedJobs.add(job.id()));
+        testHookRegistry.registerOnReap(TEST_JOB_KIND, job -> reapedJobs.add(job.id()));
+
+        final PostgresJobRepository jobRepository = new PostgresJobRepository(dataSource, testHookRegistry);
+
+        // Scenario 1: Enqueue and Complete
+        Job job1 = Job.builder().kind(TEST_JOB_KIND).queue("q1").build();
+        Job createdJob1 = jobRepository.create(job1);
+        assertEquals(1, enqueuedJobs.size());
+        assertTrue(enqueuedJobs.contains(createdJob1.id()));
+
+        Optional<Job> fetchedJob1 = jobRepository.fetchAndLockJob(UUID.randomUUID());
+        assertTrue(fetchedJob1.isPresent());
+        logger.info("Fetched and locked job: {}", fetchedJob1);
+        assertEquals(1, dequeuedJobs.size());
+        assertTrue(dequeuedJobs.contains(fetchedJob1.get().id()));
+
+        jobRepository.markComplete(fetchedJob1.get().id());
+        assertEquals(1, completedJobs.size());
+        assertTrue(completedJobs.contains(fetchedJob1.get().id()));
+
+        // Scenario 2: Enqueue and Fail
+        Job job2 = Job.builder().kind(TEST_JOB_KIND).queue("q2").build();
+        Job createdJob2 = jobRepository.create(job2);
+        assertEquals(2, enqueuedJobs.size());
+        assertTrue(enqueuedJobs.contains(createdJob2.id()));
+
+        Optional<Job> fetchedJob2 = jobRepository.fetchAndLockJob(UUID.randomUUID());
+        assertTrue(fetchedJob2.isPresent());
+        assertEquals(2, dequeuedJobs.size());
+        assertTrue(dequeuedJobs.contains(fetchedJob2.get().id()));
+
+        jobRepository.markFailed(fetchedJob2.get().id(), "Simulated failure");
+        assertEquals(1, failedJobs.size());
+        assertTrue(failedJobs.contains(fetchedJob2.get().id()));
+
+        // Scenario 3: Enqueue and Reap
+        Job job3 = Job.builder()
+                .kind(TEST_JOB_KIND)
+                .queue("q3")
+                .state(JobState.RUNNING)
+                .leaseKind(JobLeaseKind.EXPIRABLE)
+                .lockedAt(OffsetDateTime.now().minusHours(2))
+                .build();
+        Job createdJob3 = jobRepository.create(job3);
+        assertEquals(3, enqueuedJobs.size()); // Enqueued when created, even if RUNNING
+        assertTrue(enqueuedJobs.contains(createdJob3.id()));
+
+        jobRepository.reapStaleJobs();
+        assertEquals(1, reapedJobs.size());
+        assertTrue(reapedJobs.contains(createdJob3.id()));
+
+        // Verify no other hooks were called for this job kind
+        assertEquals(1, completedJobs.size());
+        assertEquals(1, failedJobs.size());
     }
 }
