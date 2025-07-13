@@ -17,9 +17,11 @@ public class HaggenEngine {
     private final PostgresQueue queue;
     private final WorkerPool workerPool;
     private final ScheduledExecutorService reaperScheduler;
+    private final HookRegistry hookRegistry;
 
-    public HaggenEngine(HikariDataSource dataSource, JobHandler jobHandler, int numberOfWorkers) {
-        this.jobRepository = new PostgresJobRepository(dataSource);
+    public HaggenEngine(HikariDataSource dataSource, JobHandler jobHandler, int numberOfWorkers, HookRegistry hookRegistry) {
+        this.hookRegistry = hookRegistry;
+        this.jobRepository = new PostgresJobRepository(dataSource, hookRegistry);
         this.queue = new PostgresQueue(jobRepository);
         this.workerPool = new WorkerPool(jobRepository, jobHandler, numberOfWorkers);
         this.reaperScheduler = Executors.newSingleThreadScheduledExecutor();

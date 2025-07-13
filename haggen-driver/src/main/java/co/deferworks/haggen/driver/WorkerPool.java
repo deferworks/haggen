@@ -37,7 +37,7 @@ public class WorkerPool {
         if (executorService != null) {
             executorService.shutdownNow();
             try {
-                if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
                     log.warn("Worker pool did not terminate in time.");
                 }
             } catch (InterruptedException e) {

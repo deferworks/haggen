@@ -27,6 +27,7 @@ dependencies {
     implementation 'ch.qos.logback:logback-classic:1.5.18'
 
     implementation(project(':haggen-core'))
+    implementation(project(':haggen-db'))
     implementation(project(':haggen-driver'))
 }
 

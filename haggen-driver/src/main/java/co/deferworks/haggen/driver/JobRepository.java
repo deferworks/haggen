@@ -26,6 +26,15 @@ public interface JobRepository {
     Job create(Job job);
 
     /**
+     * Enqueues a new job by inserting it into the database within an existing transaction.
+     *
+     * @param job The job to be enqueued.
+     * @param connection The existing JDBC connection to use for the transaction.
+     * @return The newly created job, including its generated ID and other default values.
+     */
+    Job create(Job job, java.sql.Connection connection);
+
+    /**
      * Retrieves a job by its unique ID.
      *
      * @param id The ID of the job to retrieve.

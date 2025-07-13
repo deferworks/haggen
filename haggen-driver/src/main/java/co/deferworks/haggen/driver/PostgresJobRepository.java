@@ -1,6 +1,7 @@
 package co.deferworks.haggen.driver;
 
 import co.deferworks.haggen.core.Job;
+import co.deferworks.haggen.driver.HookRegistry;
 
 import javax.sql.DataSource;
 import java.time.OffsetDateTime;
@@ -18,9 +19,15 @@ import java.util.UUID;
 public class PostgresJobRepository implements JobRepository {
 
     private final DataSource dataSource;
+    private final HookRegistry hookRegistry;
 
     public PostgresJobRepository(DataSource dataSource) {
+        this(dataSource, new HookRegistry());
+    }
+
+    public PostgresJobRepository(DataSource dataSource, HookRegistry hookRegistry) {
         this.dataSource = dataSource;
+        this.hookRegistry = hookRegistry;
     }
 
     private static final String CREATE_JOB_SQL = """
@@ -31,8 +38,16 @@ public class PostgresJobRepository implements JobRepository {
 
     @Override
     public Job create(Job job) {
-        try (var connection = dataSource.getConnection();
-             var statement = connection.prepareStatement(CREATE_JOB_SQL)) {
+        try (var connection = dataSource.getConnection()) {
+            return create(job, connection);
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("Error creating job", e);
+        }
+    }
+
+    @Override
+    public Job create(Job job, java.sql.Connection connection) {
+        try (var statement = connection.prepareStatement(CREATE_JOB_SQL)) {
 
             statement.setString(1, job.kind());
             statement.setString(2, job.queue());
@@ -46,7 +61,9 @@ public class PostgresJobRepository implements JobRepository {
 
             var resultSet = statement.executeQuery();
             if (resultSet.next()) {
-                return mapRowToJob(resultSet);
+                Job createdJob = mapRowToJob(resultSet);
+                hookRegistry.executeOnEnqueue(createdJob);
+                return createdJob;
             } else {
                 throw new RuntimeException("Failed to create job, no rows returned.");
             }
@@ -102,7 +119,9 @@ public class PostgresJobRepository implements JobRepository {
 
             var resultSet = statement.executeQuery();
             if (resultSet.next()) {
-                return Optional.of(mapRowToJob(resultSet));
+                Job fetchedJob = mapRowToJob(resultSet);
+                hookRegistry.executeOnDequeue(fetchedJob);
+                return Optional.of(fetchedJob);
             } else {
                 return Optional.empty();
             }
@@ -123,7 +142,10 @@ public class PostgresJobRepository implements JobRepository {
              var statement = connection.prepareStatement(MARK_COMPLETE_SQL)) {
 
             statement.setObject(1, jobId);
-            statement.executeUpdate();
+            int updatedRows = statement.executeUpdate();
+            if (updatedRows > 0) {
+                findById(jobId).ifPresent(hookRegistry::executeOnComplete);
+            }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error marking job as complete", e);
         }
@@ -142,7 +164,10 @@ public class PostgresJobRepository implements JobRepository {
 
             statement.setString(1, errorMessage);
             statement.setObject(2, jobId);
-            statement.executeUpdate();
+            int updatedRows = statement.executeUpdate();
+            if (updatedRows > 0) {
+                findById(jobId).ifPresent(hookRegistry::executeOnFail);
+            }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error marking job as failed", e);
         }
@@ -151,7 +176,8 @@ public class PostgresJobRepository implements JobRepository {
     private static final String REAP_STALE_JOBS_SQL = """
             UPDATE jobs
             SET state = 'QUEUED', locked_by = NULL, locked_at = NULL
-            WHERE state = 'RUNNING' AND lease_kind = 'PERMANENT';
+            WHERE state = 'RUNNING' AND lease_kind = 'PERMANENT'
+            RETURNING id, kind, queue, metadata, priority, state, run_at, created_at, attempt_count, last_error_message, last_error_details, lease_kind, locked_by, locked_at, lease_token;
             """;
 
     @Override
@@ -159,7 +185,11 @@ public class PostgresJobRepository implements JobRepository {
         try (var connection = dataSource.getConnection();
              var statement = connection.prepareStatement(REAP_STALE_JOBS_SQL)) {
 
-            statement.executeUpdate();
+            var resultSet = statement.executeQuery();
+            while (resultSet.next()) {
+                Job reapedJob = mapRowToJob(resultSet);
+                hookRegistry.executeOnReap(reapedJob);
+            }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error reaping stale jobs", e);
         }

@@ -1,6 +1,5 @@
 package co.deferworks.haggen.driver;
 
-import co.deferworks.haggen.core.Job;
 import co.deferworks.haggen.core.JobHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +36,7 @@ public class Worker implements Runnable {
                         jobRepository.markFailed(job.id(), e.getMessage());
                     }
                 });
-                Thread.sleep(1000); // Poll every second
+                Thread.sleep(500); // Poll every second
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.info("Worker {} interrupted.", workerId);
