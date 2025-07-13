@@ -73,4 +73,20 @@ public interface JobRepository {
      * if a worker fails unexpectedly.
      */
     void reapStaleJobs();
+
+    /**
+     * Marks a job as discarded.
+     *
+     * @param jobId The ID of the job to mark as discarded.
+     */
+    void markDiscarded(UUID jobId);
+
+    /**
+     * Marks a job as retrying, increments its attempt count, and sets a new run_at time for backoff.
+     *
+     * @param jobId The ID of the job to mark as retrying.
+     * @param errorMessage A descriptive message explaining the cause of the failure.
+     * @param runAt The new run_at timestamp for the job (for backoff).
+     */
+    void markRetrying(UUID jobId, String errorMessage, java.time.OffsetDateTime runAt);
 }

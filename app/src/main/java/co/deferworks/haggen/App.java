@@ -39,6 +39,15 @@ public class App {
             Job enqueuedJob = queue.enqueue(sampleJob);
             log.info("Enqueued job with ID: {} (non-transactional)", enqueuedJob.id());
 
+            // Enqueue a failing job to test retries and discard
+            Job failingJob = Job.builder()
+                    .kind("failing-job")
+                    .queue("default")
+                    .metadata("{\"data\": \"this job will fail\"}")
+                    .build();
+            Job enqueuedFailingJob = queue.enqueue(failingJob);
+            log.info("Enqueued failing job with ID: {}", enqueuedFailingJob.id());
+
             // Enqueue a sample job (transactional)
             try (Connection connection = driver.getConnection()) {
                 connection.setAutoCommit(false);
@@ -78,6 +87,9 @@ public class App {
         // Simple JobHandler implementation
         JobHandler myJobHandler = job -> {
             log.info("Handling job: {} with kind {}", job.id(), job.kind());
+            if (job.kind().equals("failing-job")) {
+                throw new RuntimeException("Simulated job failure");
+            }
             // Simulate some work
             TimeUnit.SECONDS.sleep(2);
             log.info("Finished handling job: {}", job.id());
@@ -102,6 +114,12 @@ public class App {
         hookRegistry.registerOnComplete("my-transactional-job", job -> log.info("Hook: Transactional Job {} completed.", job.id()));
         hookRegistry.registerOnFail("my-transactional-job", job -> log.warn("Hook: Transactional Job {} failed.", job.id()));
         hookRegistry.registerOnReap("my-transactional-job", job -> log.info("Hook: Transactional Job {} reaped.", job.id()));
+
+        hookRegistry.registerOnEnqueue("failing-job", job -> log.info("Hook: Failing Job {} enqueued.", job.id()));
+        hookRegistry.registerOnDequeue("failing-job", job -> log.info("Hook: Failing Job {} dequeued.", job.id()));
+        hookRegistry.registerOnFail("failing-job", job -> log.warn("Hook: Failing Job {} failed. Attempt: {}", job.id(), job.attemptCount()));
+        hookRegistry.registerOnReap("failing-job", job -> log.info("Hook: Failing Job {} reaped.", job.id()));
+        hookRegistry.registerOnDiscard("failing-job", job -> log.error("Hook: Failing Job {} DISCARDED after max retries.", job.id()));
 
         return hookRegistry;
     }

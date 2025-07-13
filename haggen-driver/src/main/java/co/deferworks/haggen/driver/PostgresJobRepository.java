@@ -83,8 +83,15 @@ public class PostgresJobRepository implements JobRepository {
 
     @Override
     public Optional<Job> findById(UUID id) {
-        try (var connection = dataSource.getConnection();
-             var statement = connection.prepareStatement(FIND_BY_ID_SQL)) {
+        try (var connection = dataSource.getConnection()) {
+            return findById(id, connection);
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("Error finding job by id", e);
+        }
+    }
+
+    public Optional<Job> findById(UUID id, java.sql.Connection connection) {
+        try (var statement = connection.prepareStatement(FIND_BY_ID_SQL)) {
 
             statement.setObject(1, id);
 
@@ -147,7 +154,7 @@ public class PostgresJobRepository implements JobRepository {
             statement.setObject(1, jobId);
             int updatedRows = statement.executeUpdate();
             if (updatedRows > 0) {
-                Optional<Job> updatedJob = findById(jobId);
+                Optional<Job> updatedJob = findById(jobId, connection);
                 if (updatedJob.isPresent()) {
                     hookRegistry.executeOnComplete(updatedJob.get());
                     log.info("Hook executed for onComplete for job: {}", jobId);
@@ -175,7 +182,7 @@ public class PostgresJobRepository implements JobRepository {
             statement.setObject(2, jobId);
             int updatedRows = statement.executeUpdate();
             if (updatedRows > 0) {
-                Optional<Job> updatedJob = findById(jobId);
+                Optional<Job> updatedJob = findById(jobId, connection);
                 if (updatedJob.isPresent()) {
                     hookRegistry.executeOnFail(updatedJob.get());
                     log.info("Hook executed for onFail for job: {}", jobId);
@@ -195,6 +202,22 @@ public class PostgresJobRepository implements JobRepository {
             RETURNING id, kind, queue, metadata, priority, state, run_at, created_at, attempt_count, last_error_message, last_error_details, lease_kind, locked_by, locked_at, lease_token;
             """;
 
+    private static final String MARK_DISCARDED_SQL = """
+            UPDATE jobs
+            SET state = 'DISCARDED'
+            WHERE id = ?;
+            """;
+
+    private static final String MARK_RETRYING_SQL = """
+            UPDATE jobs
+            SET state = 'RETRYING',
+                attempt_count = attempt_count + 1,
+                last_error_message = ?,
+                run_at = ?
+            WHERE id = ?
+            RETURNING id, kind, queue, metadata, priority, state, run_at, created_at, attempt_count, last_error_message, last_error_details, lease_kind, locked_by, locked_at, lease_token;
+            """;
+
     @Override
     public void reapStaleJobs() {
         try (var connection = dataSource.getConnection();
@@ -207,6 +230,35 @@ public class PostgresJobRepository implements JobRepository {
             }
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error reaping stale jobs", e);
+        }
+    }
+
+    @Override
+    public void markDiscarded(UUID jobId) {
+        try (var connection = dataSource.getConnection();
+             var statement = connection.prepareStatement(MARK_DISCARDED_SQL)) {
+
+            statement.setObject(1, jobId);
+            int updatedRows = statement.executeUpdate();
+            if (updatedRows > 0) {
+                findById(jobId).ifPresent(hookRegistry::executeOnDiscard);
+            }
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("Error marking job as discarded", e);
+        }
+    }
+
+    @Override
+    public void markRetrying(UUID jobId, String errorMessage, OffsetDateTime runAt) {
+        try (var connection = dataSource.getConnection();
+             var statement = connection.prepareStatement(MARK_RETRYING_SQL)) {
+
+            statement.setString(1, errorMessage);
+            statement.setObject(2, runAt);
+            statement.setObject(3, jobId);
+            statement.executeUpdate();
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("Error marking job as retrying", e);
         }
     }
 

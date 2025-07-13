@@ -317,6 +317,7 @@ class PostgresJobRepositoryTest {
         final List<UUID> dequeuedJobs = new ArrayList<>();
         final List<UUID> completedJobs = new ArrayList<>();
         final List<UUID> failedJobs = new ArrayList<>();
+        final List<UUID> discardedJobs = new ArrayList<>();
         final List<UUID> reapedJobs = new ArrayList<>();
 
         HookRegistry testHookRegistry = new HookRegistry();
@@ -324,59 +325,77 @@ class PostgresJobRepositoryTest {
         testHookRegistry.registerOnDequeue(TEST_JOB_KIND, job -> dequeuedJobs.add(job.id()));
         testHookRegistry.registerOnComplete(TEST_JOB_KIND, job -> completedJobs.add(job.id()));
         testHookRegistry.registerOnFail(TEST_JOB_KIND, job -> failedJobs.add(job.id()));
+        testHookRegistry.registerOnDiscard(TEST_JOB_KIND, job -> discardedJobs.add(job.id()));
         testHookRegistry.registerOnReap(TEST_JOB_KIND, job -> reapedJobs.add(job.id()));
 
-        final PostgresJobRepository jobRepository = new PostgresJobRepository(dataSource, testHookRegistry);
+        final PostgresJobRepository localJobRepository = new PostgresJobRepository(dataSource, testHookRegistry);
 
-        // Scenario 1: Enqueue and Complete
+        // Scenario 1: Enqueue Hook
         Job job1 = Job.builder().kind(TEST_JOB_KIND).queue("q1").build();
-        Job createdJob1 = jobRepository.create(job1);
+        Job createdJob1 = localJobRepository.create(job1);
         assertEquals(1, enqueuedJobs.size());
         assertTrue(enqueuedJobs.contains(createdJob1.id()));
 
-        Optional<Job> fetchedJob1 = jobRepository.fetchAndLockJob(UUID.randomUUID());
+        // Scenario 2: Dequeue Hook (simulated by fetching and locking)
+        // Note: fetchAndLockJob will trigger onDequeue internally
+        Optional<Job> fetchedJob1 = localJobRepository.fetchAndLockJob(UUID.randomUUID());
         assertTrue(fetchedJob1.isPresent());
-        logger.info("Fetched and locked job: {}", fetchedJob1);
         assertEquals(1, dequeuedJobs.size());
         assertTrue(dequeuedJobs.contains(fetchedJob1.get().id()));
 
-        jobRepository.markComplete(fetchedJob1.get().id());
+        // Scenario 3: Complete Hook
+        localJobRepository.markComplete(fetchedJob1.get().id());
         assertEquals(1, completedJobs.size());
         assertTrue(completedJobs.contains(fetchedJob1.get().id()));
 
-        // Scenario 2: Enqueue and Fail
+        // Scenario 4: Enqueue and Fail Hook
         Job job2 = Job.builder().kind(TEST_JOB_KIND).queue("q2").build();
-        Job createdJob2 = jobRepository.create(job2);
+        Job createdJob2 = localJobRepository.create(job2);
         assertEquals(2, enqueuedJobs.size());
         assertTrue(enqueuedJobs.contains(createdJob2.id()));
 
-        Optional<Job> fetchedJob2 = jobRepository.fetchAndLockJob(UUID.randomUUID());
+        Optional<Job> fetchedJob2 = localJobRepository.fetchAndLockJob(UUID.randomUUID());
         assertTrue(fetchedJob2.isPresent());
         assertEquals(2, dequeuedJobs.size());
         assertTrue(dequeuedJobs.contains(fetchedJob2.get().id()));
 
-        jobRepository.markFailed(fetchedJob2.get().id(), "Simulated failure");
+        localJobRepository.markFailed(fetchedJob2.get().id(), "Simulated failure");
         assertEquals(1, failedJobs.size());
         assertTrue(failedJobs.contains(fetchedJob2.get().id()));
 
-        // Scenario 3: Enqueue and Reap
-        Job job3 = Job.builder()
+        // Scenario 5: Discard Hook (after a simulated retry attempt)
+        Job job3 = Job.builder().kind(TEST_JOB_KIND).queue("q3").build();
+        Job createdJob3 = localJobRepository.create(job3);
+        assertEquals(3, enqueuedJobs.size());
+        assertTrue(enqueuedJobs.contains(createdJob3.id()));
+
+        // Simulate a job being processed and then discarded (e.g., after max retries)
+        localJobRepository.markDiscarded(createdJob3.id());
+        assertEquals(1, discardedJobs.size());
+        assertTrue(discardedJobs.contains(createdJob3.id()));
+
+        // Scenario 6: Reap Hook
+        Job job4 = Job.builder()
                 .kind(TEST_JOB_KIND)
-                .queue("q3")
+                .queue("q4")
                 .state(JobState.RUNNING)
                 .leaseKind(JobLeaseKind.EXPIRABLE)
                 .lockedAt(OffsetDateTime.now().minusHours(2))
                 .build();
-        Job createdJob3 = jobRepository.create(job3);
-        assertEquals(3, enqueuedJobs.size()); // Enqueued when created, even if RUNNING
-        assertTrue(enqueuedJobs.contains(createdJob3.id()));
+        Job createdJob4 = localJobRepository.create(job4);
+        assertEquals(4, enqueuedJobs.size());
+        assertTrue(enqueuedJobs.contains(createdJob4.id()));
 
-        jobRepository.reapStaleJobs();
+        localJobRepository.reapStaleJobs();
         assertEquals(1, reapedJobs.size());
-        assertTrue(reapedJobs.contains(createdJob3.id()));
+        assertTrue(reapedJobs.contains(createdJob4.id()));
 
-        // Verify no other hooks were called for this job kind
+        // Verify final counts for all hooks
+        assertEquals(4, enqueuedJobs.size());
+        assertEquals(2, dequeuedJobs.size());
         assertEquals(1, completedJobs.size());
         assertEquals(1, failedJobs.size());
+        assertEquals(1, discardedJobs.size());
+        assertEquals(1, reapedJobs.size());
     }
 }
