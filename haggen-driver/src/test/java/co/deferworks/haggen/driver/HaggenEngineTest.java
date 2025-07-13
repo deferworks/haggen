@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -108,5 +109,38 @@ public class HaggenEngineTest {
         assertEquals(Job.JobState.DISCARDED, finalJobState.state());
         assertEquals(MAX_ATTEMPTS, finalJobState.attemptCount());
         assertEquals(MAX_ATTEMPTS + 1, failureCounts.get(enqueuedJob.id()).get());
+    }
+
+    @Test
+    void testEndToEndWorkerScaleCorrectly() throws InterruptedException {
+        final ConcurrentHashMap<UUID, Integer> completedJobs = new ConcurrentHashMap<UUID, Integer>();
+        final CountDownLatch completedLatch = new CountDownLatch(100);
+        final String JOB_KIND = "scaled-out-jobs";
+
+        JobHandler countingJobHandler = job -> {
+            completedJobs.computeIfAbsent(job.lockedBy(), k -> 0);
+            completedJobs.computeIfPresent(job.lockedBy(), (k, v) -> v + 1);
+        };
+
+        HookRegistry hookRegistry = new HookRegistry();
+        hookRegistry.registerOnComplete(JOB_KIND, job -> completedLatch.countDown());
+
+        jobRepository = new PostgresJobRepository(dataSource, hookRegistry);
+        engine = new HaggenEngine(dataSource, countingJobHandler, 20, hookRegistry);
+
+        engine.start();
+
+        Queue queue = new PostgresQueue(jobRepository);
+
+        IntStream.range(0, 100).forEach(i -> {
+            Job job = Job.builder().kind(JOB_KIND).queue("default").build();
+            Job enqueued = queue.enqueue(job);
+        });
+
+        assertTrue(completedLatch.await(30, TimeUnit.SECONDS));
+
+        var actualCompletedJobsCount = completedJobs.reduceValuesToInt(1, k -> k, 0, Integer::sum);
+
+        assertEquals(100, actualCompletedJobsCount);
     }
 }
