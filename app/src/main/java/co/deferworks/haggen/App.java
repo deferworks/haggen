@@ -95,8 +95,7 @@ public class App {
             log.info("Finished handling job: {}", job.id());
         };
 
-        PostgresDriver driver = new PostgresDriver(jdbcUrl, username, password, myJobHandler, 5, hookRegistry);
-        return driver;
+        return new PostgresDriver(jdbcUrl, username, password, myJobHandler, 5, hookRegistry);
     }
 
     private static HookRegistry getHookRegistry() {

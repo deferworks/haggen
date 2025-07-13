@@ -5,7 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.OffsetDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 public class Worker implements Runnable {
@@ -37,7 +36,7 @@ public class Worker implements Runnable {
                     } catch (Exception e) {
                         log.error("Worker {} failed to process job {}: {}", workerId, job.id(), e.getMessage(), e);
                         if (job.attemptCount() < MAX_ATTEMPTS) {
-                            OffsetDateTime runAt = OffsetDateTime.now().plus((long) Math.pow(2, job.attemptCount()), ChronoUnit.SECONDS);
+                            OffsetDateTime runAt = OffsetDateTime.now().plusSeconds((long) Math.pow(2, job.attemptCount()));
                             jobRepository.markRetrying(job.id(), e.getMessage(), runAt);
                             log.info("Worker {} marked job {} for retry. Attempt: {}/{} ", workerId, job.id(), job.attemptCount() + 1, MAX_ATTEMPTS);
                         } else {
