@@ -398,4 +398,67 @@ class PostgresJobRepositoryTest {
         assertEquals(1, discardedJobs.size());
         assertEquals(1, reapedJobs.size());
     }
+
+    @Test
+    void testRenewLease() {
+        UUID workerId = UUID.randomUUID();
+        Job job = Job.builder()
+                .kind("lease-test")
+                .queue("default")
+                .state(JobState.RUNNING)
+                .lockedBy(workerId)
+                .lockedAt(OffsetDateTime.now().minusMinutes(30))
+                .leaseKind(JobLeaseKind.EXPIRABLE)
+                .build();
+
+        Job createdJob = jobRepository.create(job);
+        OffsetDateTime initialLockTime = createdJob.lockedAt();
+
+        jobRepository.renewLease(createdJob.id(), workerId);
+
+        Optional<Job> updatedJobOpt = jobRepository.findById(createdJob.id());
+        assertTrue(updatedJobOpt.isPresent());
+
+        Job updatedJob = updatedJobOpt.get();
+        assertNotNull(updatedJob.lockedAt());
+        assertTrue(updatedJob.lockedAt().isAfter(initialLockTime));
+    }
+
+    @Test
+    void testMarkRetrying() {
+        Job job = Job.builder()
+                .kind("retry-test")
+                .queue("default")
+                .state(JobState.FAILED)
+                .attemptCount(1)
+                .build();
+
+        Job createdJob = jobRepository.create(job);
+        OffsetDateTime retryTime = OffsetDateTime.now().plusMinutes(5);
+        jobRepository.markRetrying(createdJob.id(), "First retry", retryTime);
+
+        Optional<Job> retryingJobOpt = jobRepository.findById(createdJob.id());
+        assertTrue(retryingJobOpt.isPresent());
+
+        Job retryingJob = retryingJobOpt.get();
+        assertEquals(JobState.QUEUED, retryingJob.state());
+        assertEquals("First retry", retryingJob.lastErrorMessage());
+    }
+
+    @Test
+    void testMarkDiscarded() {
+        Job job = Job.builder()
+                .kind("discard-test")
+                .queue("default")
+                .state(JobState.FAILED)
+                .build();
+
+        Job createdJob = jobRepository.create(job);
+
+        jobRepository.markDiscarded(createdJob.id());
+
+        Optional<Job> discardedJobOpt = jobRepository.findById(createdJob.id());
+        assertTrue(discardedJobOpt.isPresent());
+        assertEquals(JobState.DISCARDED, discardedJobOpt.get().state());
+    }
 }

@@ -89,4 +89,12 @@ public interface JobRepository {
      * @param runAt The new run_at timestamp for the job (for backoff).
      */
     void markRetrying(UUID jobId, String errorMessage, java.time.OffsetDateTime runAt);
+
+    /**
+     * Renews the lease on a job, extending its `locked_at` timestamp to prevent it from being reaped.
+     *
+     * @param jobId The ID of the job to renew the lease for.
+     * @param workerId The ID of the worker holding the lease.
+     */
+    void renewLease(UUID jobId, UUID workerId);
 }

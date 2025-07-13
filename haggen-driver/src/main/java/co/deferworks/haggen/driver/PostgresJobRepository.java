@@ -210,12 +210,11 @@ public class PostgresJobRepository implements JobRepository {
 
     private static final String MARK_RETRYING_SQL = """
             UPDATE jobs
-            SET state = 'RETRYING',
+            SET state = 'QUEUED',
                 attempt_count = attempt_count + 1,
                 last_error_message = ?,
                 run_at = ?
-            WHERE id = ?
-            RETURNING id, kind, queue, metadata, priority, state, run_at, created_at, attempt_count, last_error_message, last_error_details, lease_kind, locked_by, locked_at, lease_token;
+            WHERE id = ?;
             """;
 
     @Override
@@ -259,6 +258,25 @@ public class PostgresJobRepository implements JobRepository {
             statement.executeUpdate();
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Error marking job as retrying", e);
+        }
+    }
+
+    private static final String RENEW_LEASE_SQL = """
+            UPDATE jobs
+            SET locked_at = NOW()
+            WHERE id = ? AND locked_by = ?;
+            """;
+
+    @Override
+    public void renewLease(UUID jobId, UUID workerId) {
+        try (var connection = dataSource.getConnection();
+             var statement = connection.prepareStatement(RENEW_LEASE_SQL)) {
+
+            statement.setObject(1, jobId);
+            statement.setObject(2, workerId);
+            statement.executeUpdate();
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("Error renewing lease", e);
         }
     }
 

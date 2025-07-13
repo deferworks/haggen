@@ -15,11 +15,17 @@ public class Worker implements Runnable {
     private final UUID workerId;
     private final PostgresJobRepository jobRepository;
     private final JobHandler jobHandler;
+    private final RetryStrategy retryStrategy;
 
     public Worker(UUID workerId, PostgresJobRepository jobRepository, JobHandler jobHandler) {
+        this(workerId, jobRepository, jobHandler, new ExponentialBackoffRetryStrategy());
+    }
+
+    public Worker(UUID workerId, PostgresJobRepository jobRepository, JobHandler jobHandler, RetryStrategy retryStrategy) {
         this.workerId = workerId;
         this.jobRepository = jobRepository;
         this.jobHandler = jobHandler;
+        this.retryStrategy = retryStrategy;
     }
 
     @Override
@@ -36,7 +42,7 @@ public class Worker implements Runnable {
                     } catch (Exception e) {
                         log.error("Worker {} failed to process job {}: {}", workerId, job.id(), e.getMessage(), e);
                         if (job.attemptCount() < MAX_ATTEMPTS) {
-                            OffsetDateTime runAt = OffsetDateTime.now().plusSeconds((long) Math.pow(2, job.attemptCount()));
+                            OffsetDateTime runAt = retryStrategy.nextRetryTime(job);
                             jobRepository.markRetrying(job.id(), e.getMessage(), runAt);
                             log.info("Worker {} marked job {} for retry. Attempt: {}/{} ", workerId, job.id(), job.attemptCount() + 1, MAX_ATTEMPTS);
                         } else {

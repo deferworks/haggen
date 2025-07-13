@@ -20,10 +20,14 @@ public class HaggenEngine {
     private final HookRegistry hookRegistry;
 
     public HaggenEngine(HikariDataSource dataSource, JobHandler jobHandler, int numberOfWorkers, HookRegistry hookRegistry) {
+        this(dataSource, jobHandler, numberOfWorkers, hookRegistry, new ExponentialBackoffRetryStrategy());
+    }
+
+    public HaggenEngine(HikariDataSource dataSource, JobHandler jobHandler, int numberOfWorkers, HookRegistry hookRegistry, RetryStrategy retryStrategy) {
         this.hookRegistry = hookRegistry;
         this.jobRepository = new PostgresJobRepository(dataSource, hookRegistry);
         this.queue = new PostgresQueue(jobRepository);
-        this.workerPool = new WorkerPool(jobRepository, jobHandler, numberOfWorkers);
+        this.workerPool = new WorkerPool(jobRepository, jobHandler, numberOfWorkers, retryStrategy);
         this.reaperScheduler = Executors.newSingleThreadScheduledExecutor();
     }
 

@@ -16,19 +16,25 @@ public class WorkerPool {
     private final PostgresJobRepository jobRepository;
     private final JobHandler jobHandler;
     private final int numberOfWorkers;
+    private final RetryStrategy retryStrategy;
     private ExecutorService executorService;
 
     public WorkerPool(PostgresJobRepository jobRepository, JobHandler jobHandler, int numberOfWorkers) {
+        this(jobRepository, jobHandler, numberOfWorkers, new ExponentialBackoffRetryStrategy());
+    }
+
+    public WorkerPool(PostgresJobRepository jobRepository, JobHandler jobHandler, int numberOfWorkers, RetryStrategy retryStrategy) {
         this.jobRepository = jobRepository;
         this.jobHandler = jobHandler;
         this.numberOfWorkers = numberOfWorkers;
+        this.retryStrategy = retryStrategy;
     }
 
     public void start() {
         log.info("Starting worker pool with {} workers.", numberOfWorkers);
         executorService = Executors.newVirtualThreadPerTaskExecutor();
         for (int i = 0; i < numberOfWorkers; i++) {
-            executorService.submit(new Worker(UUID.randomUUID(), jobRepository, jobHandler));
+            executorService.submit(new Worker(UUID.randomUUID(), jobRepository, jobHandler, retryStrategy));
         }
     }
 

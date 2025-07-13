@@ -166,9 +166,6 @@ public record Job(
         // The job has been canceled and will not be processed.
         CANCELLED,
 
-        // The job is currently being retried after a failure.
-        RETRYING,
-
         // The job has been discarded and will not be processed.
         DISCARDED,
 
@@ -217,6 +214,8 @@ public record Job(
                 " job.kind=" + kind +
                 " job.queue=" + queue +
                 " job.state=" + state +
-                " job.priority=" + priority;
+                " job.priority=" + priority +
+                " job.run_at=" + runAt
+                ;
     }
 }
